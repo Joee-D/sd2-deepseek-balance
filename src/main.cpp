@@ -136,7 +136,7 @@ void drawDate() {
     if (lastUpdateTime > 0) {
         struct tm tmv;
         localtime_r(&lastUpdateTime, &tmv);
-        char buf[24];
+        char buf[64];
         snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
                  tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
                  tmv.tm_hour, tmv.tm_min);
