@@ -10,11 +10,10 @@
 
 ## 显示内容（英文界面）
 
-- 总余额（48px 大数字）+ 币种
+- 总余额（48px 七段大数字，居中显示，不显示币种）
 - **TOP-UP**：充值余额；**GRANTED**：赠送余额
-- **STATUS**：Available / Unavailable，以及错误提示（Invalid API key、Network error、HTTP xxx 等）
-- 右上角状态点：绿=成功 红=失败 黄=进行中
-- 底部显示数据更新时间（本地时区，如 UPDATED 08-23 11:39）
+- 右上角状态点：绿=成功 红=失败 黄=连接/同步/获取中（错误详情见串口日志）
+- 底部显示数据日期时间（如 2026-08-23 11:39）
 - 板载 WS2812 状态灯：蓝=连接中 绿=成功 红=失败
 - 默认每 60 秒自动刷新（`config.h` 可改）
 
@@ -45,7 +44,10 @@
 ## 快速开始
 
 1. 用 VS Code 打开本工程（已安装 PlatformIO 插件）。
-2. 编辑 [`src/config.h`](src/config.h)：
+2. 复制 [`src/config.example.h`](src/config.example.h) 为 `src/config.h`，然后编辑：
+   ```bash
+   cp src/config.example.h src/config.h
+   ```
    - `WIFI_SSID` / `WIFI_PASSWORD`：你的 WiFi
    - `DEEPSEEK_API_KEY`：在 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 创建，`sk-` 开头
    - `POLL_INTERVAL_MS`：刷新间隔（默认 60 秒）
@@ -60,7 +62,8 @@ src/
 ├── DeepSeekClient.h  HTTPS 余额查询（WiFiClientSecure + BearSSL）
 ├── cert.h            DigiCert Global Root G2 根证书（TLS 校验）
 ├── logo.h            DeepSeek 官方字标位图（左上角）
-└── config.h          用户配置（WiFi / API Key / 刷新间隔）
+├── config.example.h  配置模板（复制为 config.h 后填写，config.h 不入库）
+└── config.h          本地配置（.gitignore 忽略，不会提交）
 images/               屏幕效果图
 ```
 

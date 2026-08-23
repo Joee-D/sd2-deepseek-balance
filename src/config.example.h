@@ -1,8 +1,10 @@
 #pragma once
 
 // ============================================================
-//  SD2 小电视 DeepSeek 余额显示器 - 用户配置
-//  修改后保存，然后在 VS Code 中点击 PlatformIO: Upload
+//  SD2 小电视 DeepSeek 余额显示器 - 用户配置模板
+//  使用方法：复制本文件为 src/config.h 后填写你的配置
+//    cp src/config.example.h src/config.h
+//  config.h 已在 .gitignore 中，不会被提交到仓库
 // ============================================================
 
 // ---- WiFi ----

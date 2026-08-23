@@ -27,9 +27,13 @@ TFT_eSPI tft = TFT_eSPI();
 
 // ---------- 颜色 ----------
 #define C_BG      tft.color565(0x0E, 0x11, 0x20)
-#define C_CARD    tft.color565(0x15, 0x1B, 0x2E)
+#define C_CARD    tft.color565(0x1B, 0x22, 0x3C)
+#define C_BORDER  tft.color565(0x2E, 0x38, 0x58)
 #define C_LINE    tft.color565(0x23, 0x2B, 0x46)
 #define C_SUB     tft.color565(0x8A, 0x94, 0xB8)
+#define C_LABEL   tft.color565(0x9A, 0xA5, 0xC8)
+#define C_DATE    tft.color565(0x8F, 0x9B, 0xBF)
+#define C_SHADOW  tft.color565(0x0A, 0x0F, 0x2A)
 #define C_ACCENT  tft.color565(0x4D, 0x6B, 0xFE)
 #define C_WHITE   tft.color565(0xFF, 0xFF, 0xFF)
 #define C_GREEN   tft.color565(0x34, 0xD3, 0x99)
@@ -49,8 +53,6 @@ static uint32_t lastHeapPrint = 0;
 static uint32_t bootStart = 0;
 
 static DeepSeekBalance lastData;
-static String statusText = "Waiting";
-static uint16_t statusColor = C_SUB;
 static uint16_t dotColor = C_YELLOW;
 static time_t lastUpdateTime = 0; // 数据更新时间（本地时区）
 
@@ -106,73 +108,67 @@ void drawBootPage(bool fail) {
     tft.pushImage((240 - DS_LOGO_W) / 2, 100, DS_LOGO_W, DS_LOGO_H, ds_logo);
     const char *hint = fail ? "WiFi failed, retrying..." : "Connecting WiFi...";
     int tw = textWidth(hint, &FreeSans9pt7b);
-    drawText((240 - tw) / 2, 148, hint, fail ? C_RED : C_SUB, &FreeSans9pt7b);
+    drawText((240 - tw) / 2, 148, hint, fail ? C_RED : C_LABEL, &FreeSans9pt7b);
 }
 
 // ---------- 主页面元素 ----------
 void drawBigTotal() {
-    tft.fillRect(10, 36, 220, 68, C_BG); // 清除旧数字+币种，避免残影
+    tft.fillRect(10, 44, 220, 64, C_BG); // 清除旧数字，避免残影
     String total = hasData ? prettyBalance(lastData.total_balance) : "--";
     tft.setTextFont(7); // 48px 七段数字（原版字体）
-    tft.setTextColor(C_WHITE);
     tft.setTextDatum(TL_DATUM);
-    tft.drawString(total, 14, 44);
     int w = tft.textWidth(total, 7);
-    drawText(14 + w + 8, 58, hasData ? lastData.currency : "CNY", C_ACCENT, &FreeSans9pt7b);
+    int x = (240 - w) / 2;
+    tft.setTextColor(C_SHADOW);            // 轻微投影
+    tft.drawString(total, x + 1, 55);
+    tft.setTextColor(C_WHITE);
+    tft.drawString(total, x, 54);          // 居中显示
 }
 
-void drawRowValue(int y, const String &value, const String &unit) {
-    tft.fillRect(124, y - 4, 110, 24, C_BG);
-    int vw = textWidth(value, &FreeSans9pt7b);
+void drawRowValue(int y, const String &value) {
+    tft.fillRect(124, y - 4, 102, 24, C_CARD); // 只清卡片内区域，用卡片底色，避免擦掉右边框
     drawText(128, y, value, C_WHITE, &FreeSans9pt7b);
-    drawText(128 + vw + 6, y, unit, C_ACCENT, &FreeSans9pt7b);
 }
 
-void drawStatusArea() {
-    tft.fillRect(124, 174, 110, 24, C_BG);
-    drawText(128, 178, statusText, statusColor, &FreeSans9pt7b);
-}
-
-void drawUpdateTime() {
+void drawDate() {
     tft.fillRect(0, 206, 240, 34, C_BG);
-    String s = "UPDATED --";
+    String s = "----";
     if (lastUpdateTime > 0) {
         struct tm tmv;
         localtime_r(&lastUpdateTime, &tmv);
         char buf[24];
-        snprintf(buf, sizeof(buf), "UPDATED %02d-%02d %02d:%02d",
-                 tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour, tmv.tm_min);
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
+                 tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                 tmv.tm_hour, tmv.tm_min);
         s = buf;
     }
-    drawText((240 - textWidth(s, &FreeSans9pt7b)) / 2, 214, s, C_SUB, &FreeSans9pt7b);
+    drawText((240 - textWidth(s, &FreeSans9pt7b)) / 2, 214, s, C_DATE, &FreeSans9pt7b);
 }
 
 void drawMainPage() {
     tft.fillScreen(C_BG);
 
     // 顶栏：左上角 DeepSeek 完整字标（鲸鱼 + deepseek）
-    tft.pushImage(12, 2, DS_LOGO_W, DS_LOGO_H, ds_logo);
+    tft.pushImage(10, 1, DS_LOGO_W, DS_LOGO_H, ds_logo);
     drawDot(224, 15, dotColor);
-    tft.drawFastHLine(16, 32, 208, C_LINE);
+    tft.drawCircle(224, 15, 7, C_BORDER); // 状态点圆环
+    tft.drawFastHLine(16, 40, 208, C_BORDER);
 
     // 总余额（大数字，无标题）
     drawBigTotal();
 
     // 卡片
-    tft.fillRoundRect(12, 104, 216, 94, 12, C_CARD);
-    tft.drawRoundRect(12, 104, 216, 94, 12, C_LINE);
-    drawText(26, 118, "TOP-UP", C_SUB, &FreeSans9pt7b);
-    drawText(26, 148, "GRANTED", C_SUB, &FreeSans9pt7b);
-    drawText(26, 178, "STATUS", C_SUB, &FreeSans9pt7b);
-    tft.drawFastHLine(36, 144, 168, C_LINE);
-    tft.drawFastHLine(36, 174, 168, C_LINE);
+    tft.fillRoundRect(12, 112, 216, 88, 12, C_CARD);
+    tft.drawRoundRect(12, 112, 216, 88, 12, C_BORDER);
+    tft.fillCircle(20, 134, 3, C_ACCENT);   // TOP-UP 圆点
+    tft.fillCircle(20, 172, 3, C_GREEN);    // GRANTED 圆点
+    drawText(26, 128, "TOP-UP", C_LABEL, &FreeSans9pt7b);
+    drawText(26, 166, "GRANTED", C_LABEL, &FreeSans9pt7b);
+    tft.drawFastHLine(36, 154, 168, C_BORDER);
 
-    drawRowValue(118, hasData ? prettyBalance(lastData.topped_up_balance) : "--",
-                 hasData ? lastData.currency : "");
-    drawRowValue(148, hasData ? prettyBalance(lastData.granted_balance) : "--",
-                 hasData ? lastData.currency : "");
-    drawStatusArea();
-    drawUpdateTime();
+    drawRowValue(128, hasData ? prettyBalance(lastData.topped_up_balance) : "--");
+    drawRowValue(166, hasData ? prettyBalance(lastData.granted_balance) : "--");
+    drawDate();
 }
 
 // ---------- 网络 ----------
@@ -184,8 +180,6 @@ void handleWiFi() {
             Serial.println(WiFi.localIP().toString().c_str());
             bootDone = true;
             dotColor = C_YELLOW;
-            statusText = "Syncing time...";
-            statusColor = C_SUB;
             drawMainPage();
             configTime(TZ_OFFSET_SEC, 0, NTP_SERVER, "pool.ntp.org");
             lastFetchMs = millis() - POLL_INTERVAL_MS; // 立即拉取
@@ -196,11 +190,8 @@ void handleWiFi() {
     if (wifiReady) {
         wifiReady = false;
         dotColor = C_YELLOW;
-        statusText = "WiFi lost";
-        statusColor = C_RED;
         if (bootDone) {
             drawDot(224, 15, dotColor);
-            drawStatusArea();
         }
     }
 
@@ -229,20 +220,13 @@ void handleFetch() {
         if (time(nullptr) > 1600000000) {
             timeSynced = true;
             Serial.printf("NTP time synced: %lu\n", (unsigned long)time(nullptr));
-        } else {
-            statusText = "Syncing time...";
-            statusColor = C_SUB;
-            drawStatusArea();
-            return;
         }
+        return;
     }
 
     // 未填 Key 时直接提示
     if (strlen(DEEPSEEK_API_KEY) < 20 || strncmp(DEEPSEEK_API_KEY, "sk-", 3) != 0) {
-        statusText = "SET API KEY";
-        statusColor = C_RED;
         dotColor = C_RED;
-        drawStatusArea();
         drawDot(224, 15, dotColor);
         lastFetchMs = millis();
         return;
@@ -250,9 +234,6 @@ void handleFetch() {
 
     fetching = true;
     dotColor = C_YELLOW;
-    statusText = "Fetching...";
-    statusColor = C_SUB;
-    drawStatusArea();
     drawDot(224, 15, dotColor);
 
     DeepSeekBalance d;
@@ -267,22 +248,16 @@ void handleFetch() {
         lastData = d;
         lastUpdateTime = time(nullptr);
         dotColor = C_GREEN;
-        statusText = d.is_available ? "Available" : "Unavailable";
-        statusColor = d.is_available ? C_GREEN : C_RED;
         Serial.printf("Balance: %s %s (available=%d)\n",
                       d.total_balance.c_str(), d.currency.c_str(), d.is_available);
         drawBigTotal();
-        drawRowValue(118, prettyBalance(d.topped_up_balance), d.currency);
-        drawRowValue(148, prettyBalance(d.granted_balance), d.currency);
-        drawStatusArea();
-        drawUpdateTime();
+        drawRowValue(128, prettyBalance(d.topped_up_balance));
+        drawRowValue(166, prettyBalance(d.granted_balance));
+        drawDate();
     } else {
         dotColor = C_RED;
-        statusText = d.error;
-        statusColor = C_RED;
         Serial.printf("Fetch failed: %s (HTTP %d)\n", d.error.c_str(), d.http_code);
         if (!hasData) drawBigTotal();
-        drawStatusArea();
     }
     drawDot(224, 15, dotColor);
 
