@@ -28,6 +28,12 @@ const uint32_t POLL_INTERVAL_MS = 60UL * 1000UL; // 默认 60 秒
 #define NTP_SERVER "ntp.aliyun.com"
 #define TZ_OFFSET_SEC (8UL * 3600UL)
 
+// ---- 定时休眠 ----
+// 默认 00:00-07:00 关闭显示并停止获取数据（WiFi 保持连接，醒来立即恢复）
+#define ENABLE_SLEEP 1
+#define SLEEP_START_HOUR 0   // 开始休眠（本地时间，小时）
+#define SLEEP_END_HOUR 7     // 结束休眠（本地时间，小时）
+
 // ---- 板载 WS2812 状态灯（GPIO12）----
 // 连接中=蓝 成功=绿 失败=红；不需要可设为 0
 #define USE_WS2812_STATUS 1

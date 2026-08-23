@@ -47,8 +47,10 @@ static bool hasData = false;
 static bool fetching = false;
 static bool wifiFailShown = false;
 static bool timeSynced = false;
+static bool sleeping = false;
 static uint32_t lastFetchMs = 0;
 static uint32_t lastWifiAttempt = 0;
+static uint32_t lastSleepCheck = 0;
 static uint32_t lastHeapPrint = 0;
 static uint32_t bootStart = 0;
 
@@ -171,6 +173,43 @@ void drawMainPage() {
     drawDate();
 }
 
+// ---------- 定时休眠 ----------
+bool isSleepHour() {
+    if (!timeSynced) return false; // 时间未同步时不休眠
+    time_t now = time(nullptr);
+    struct tm tmv;
+    localtime_r(&now, &tmv);
+    int h = tmv.tm_hour;
+#if SLEEP_START_HOUR < SLEEP_END_HOUR
+    return (h >= SLEEP_START_HOUR && h < SLEEP_END_HOUR);
+#else
+    return (h >= SLEEP_START_HOUR || h < SLEEP_END_HOUR); // 跨天窗口
+#endif
+}
+
+void updateSleep() {
+#if ENABLE_SLEEP
+    bool should = isSleepHour();
+    if (should && !sleeping) {
+        sleeping = true;
+        analogWrite(TFT_BL, 1023); // 反相背光：高电平 = 关闭
+#if USE_WS2812_STATUS
+        setLed(ws2812.Color(0, 0, 0));
+#endif
+        Serial.println("Sleep mode: display off, fetch paused");
+    } else if (!should && sleeping) {
+        sleeping = false;
+        setBacklight(BRIGHTNESS);
+#if USE_WS2812_STATUS
+        setLed(ws2812.Color(0, 80, 255));
+#endif
+        if (bootDone) drawMainPage();
+        lastFetchMs = millis() - POLL_INTERVAL_MS; // 醒来立即刷新
+        Serial.println("Wake up: display on");
+    }
+#endif
+}
+
 // ---------- 网络 ----------
 void handleWiFi() {
     if (WiFi.status() == WL_CONNECTED) {
@@ -180,7 +219,7 @@ void handleWiFi() {
             Serial.println(WiFi.localIP().toString().c_str());
             bootDone = true;
             dotColor = C_YELLOW;
-            drawMainPage();
+            if (!sleeping) drawMainPage();
             configTime(TZ_OFFSET_SEC, 0, NTP_SERVER, "pool.ntp.org");
             lastFetchMs = millis() - POLL_INTERVAL_MS; // 立即拉取
         }
@@ -212,7 +251,7 @@ void handleWiFi() {
 }
 
 void handleFetch() {
-    if (!wifiReady || fetching) return;
+    if (!wifiReady || fetching || sleeping) return;
     if (millis() - lastFetchMs < POLL_INTERVAL_MS) return;
 
     // 证书校验前先等 NTP 时间同步
@@ -223,6 +262,7 @@ void handleFetch() {
         }
         return;
     }
+    if (isSleepHour()) return; // 休眠时段不拉取数据
 
     // 未填 Key 时直接提示
     if (strlen(DEEPSEEK_API_KEY) < 20 || strncmp(DEEPSEEK_API_KEY, "sk-", 3) != 0) {
@@ -296,6 +336,10 @@ void loop() {
     handleWiFi();
     handleFetch();
 
+    if (millis() - lastSleepCheck >= 1000) {
+        lastSleepCheck = millis();
+        updateSleep();
+    }
     if (millis() - lastHeapPrint >= 10000) {
         lastHeapPrint = millis();
         Serial.printf("Free heap: %u B\n", ESP.getFreeHeap());
