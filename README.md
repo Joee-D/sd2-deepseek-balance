@@ -6,7 +6,7 @@
 
 ## 屏幕效果
 
-![屏幕显示效果](images/screenshot.png)
+![屏幕显示效果](images/screenshot.jpg)
 
 ## 显示内容（英文界面）
 
