@@ -1,0 +1,3 @@
+[submodule "lib/sd2-common"]
+	path = lib/sd2-common
+	url = https://github.com/Joee-D/sd2-common.git

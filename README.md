@@ -44,16 +44,18 @@
 
 ## 快速开始
 
-1. 用 VS Code 打开本工程（已安装 PlatformIO 插件）。
-2. 复制 [`src/config.example.h`](src/config.example.h) 为 `src/config.h`，然后编辑：
+1. 克隆工程时请使用 `git clone --recursive <仓库地址>`（或克隆后执行 `git submodule update --init`）。公共库 [`sd2-common`](https://github.com/Joee-D/sd2-common) 会作为子模块出现在 `lib/sd2-common`，构建时自动编译，无需额外操作。
+2. 用 VS Code 打开本工程（已安装 PlatformIO 插件）。
+3. 复制 [`src/config.example.h`](src/config.example.h) 为 `src/config.h`，然后编辑：
    ```bash
    cp src/config.example.h src/config.h
    ```
    - `WIFI_SSID` / `WIFI_PASSWORD`：你的 WiFi
    - `DEEPSEEK_API_KEY`：在 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 创建，`sk-` 开头
    - `POLL_INTERVAL_MS`：刷新间隔（默认 60 秒）
-3. USB 连接小电视，点击 VS Code 底部 PlatformIO 工具栏的 **Upload**（或终端 `pio run -t upload`）。
-4. 点击 **Serial Monitor**（波特率 921600）可查看日志。
+   - `BRIGHTNESS`：屏幕亮度（0~1023，默认 800）
+4. USB 连接小电视，点击 VS Code 底部 PlatformIO 工具栏的 **Upload**（或终端 `pio run -t upload`）。
+5. 点击 **Serial Monitor**（波特率 921600）可查看日志。
 
 ## 目录结构
 
@@ -66,7 +68,10 @@ src/
 ├── config.example.h  配置模板（复制为 config.h 后填写，config.h 不入库）
 └── config.h          本地配置（.gitignore 忽略，不会提交）
 images/               屏幕效果图
+lib/sd2-common/       公共库子模块：WiFi 连接/校时/休眠/背光/HTTP/格式化
 ```
+
+> 与 [`sd2-openwrt-traffic`](https://github.com/Joee-D/sd2-openwrt-traffic) 共用的基础功能（WiFi、NTP、定时休眠、背光、HTTP、格式化）已提炼到 [`sd2-common`](https://github.com/Joee-D/sd2-common)，本工程只保留 DeepSeek 余额相关的界面与请求逻辑。
 
 ## 工作原理
 
@@ -92,7 +97,7 @@ NTP 服务器不可达，可改 `config.h` 中 `NTP_SERVER`（如 `ntp.tencent.c
 
 **4. 屏幕花屏 / 无显示**
 
-- 确认是 ST7789 240×240（SD2 标准配置）；若为其他驱动，修改 `platformio.ini` 的驱动宏和引脚。
+- 确认是 ST7789 240×240（SD2 标准配置）；屏幕驱动与引脚已固化在 [`sd2-common/platformio/tft_setup.h`](https://github.com/Joee-D/sd2-common)，仅当硬件不同时才需要改。
 - 背光亮度：`config.h` 中 `BRIGHTNESS`（0~1023）。
 
 **5. 烧录失败**

@@ -4,11 +4,13 @@
 // 接口文档: https://api-docs.deepseek.com/zh-cn/api/get-user-balance
 // GET https://api.deepseek.com/user/balance
 // Authorization: Bearer <API Key>
+// 底层 HTTP 读取/解析由 sd2-common 的 sd2::readHttpResponse 提供。
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <SD2Common.h>
 
 #include "config.h"
 #include "cert.h"
@@ -56,37 +58,13 @@ static bool fetchDeepSeekBalance(DeepSeekBalance &out, uint32_t timeout_ms = 800
                  "Connection: close\r\n\r\n");
     client.flush();
 
-    // 手动读取原始响应（最多 6 秒）
-    String raw;
-    uint32_t r0 = millis();
-    while (millis() - r0 < 6000) {
-        while (client.available()) {
-            raw += (char)client.read();
-        }
-        if (raw.length() > 0 && !client.connected() && client.available() == 0) break;
-        delay(10);
-    }
-
-    // 拆分状态行与响应体
-    String statusLine, body;
-    int hEnd = raw.indexOf("\r\n\r\n");
-    if (hEnd < 0) hEnd = raw.indexOf("\n\n");
-    if (hEnd >= 0) {
-        statusLine = raw.substring(0, hEnd);
-        body = raw.substring(hEnd + (raw.indexOf("\r\n\r\n") >= 0 ? 4 : 2));
-    } else {
-        statusLine = raw;
-    }
-    out.http_code = 0;
-    int sp2 = statusLine.indexOf(' ');
-    int sp3 = statusLine.indexOf(' ', sp2 + 1);
-    if (sp2 > 0 && sp3 > sp2) {
-        out.http_code = statusLine.substring(sp2 + 1, sp3).toInt();
-    }
+    // 读取响应（最多 6 秒），自动拆 header/body、解析状态码、解 chunked
+    sd2::HttpResponse resp = sd2::readHttpResponse(client, 6000);
+    out.http_code = resp.httpCode;
     Serial.printf("HTTP %d (%lu ms)\n", out.http_code, millis() - t0);
 
     DynamicJsonDocument doc(1024);
-    DeserializationError err = deserializeJson(doc, body);
+    DeserializationError err = deserializeJson(doc, resp.body);
     if (err) {
         Serial.printf("JSON parse error: %s\n", err.c_str());
         out.error = "Response error";

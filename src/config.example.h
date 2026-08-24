@@ -39,11 +39,9 @@ const uint32_t POLL_INTERVAL_MS = 60UL * 1000UL; // 默认 60 秒
 #define USE_WS2812_STATUS 1
 
 // ---- 屏幕背光 ----
-// SD2 背光接 GPIO5(D1)，ESP8266 analogWrite 范围 0~1023
-// SD2 背光为反相 PWM（值越大越暗），代码里会自动反转
-#define TFT_BL 5
-#define BACKLIGHT_INVERTED 1   // 1=反相（SD2 标准），0=正相
-#define BRIGHTNESS 800         // 0~1023，数值越大越亮
+// 背光引脚(GPIO5/D1)与反相 PWM 为 SD2 固定硬件，已固化在 main.cpp，
+// 这里只需保留亮度（0~1023，数值越大越亮，默认 800）
+#define BRIGHTNESS 800
 
 // ---- 串口 ----
 #define SERIAL_BAUD 921600

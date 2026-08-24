@@ -5,6 +5,7 @@
 //  参考: https://github.com/Jason6111/sd2
 //  接口: https://api-docs.deepseek.com/zh-cn/api/get-user-balance
 //
+//  公共基础功能来自 sd2-common（WiFi/NTP/休眠/背光/HTTP/格式化）
 //  使用前先修改 src/config.h（WiFi / API Key）
 //  界面直接用 TFT_eSPI 绘制（字体放 Flash，ESP8266 稳定）
 // ============================================================
@@ -13,6 +14,7 @@
 #include <ESP8266WiFi.h>
 #include <time.h>
 #include <TFT_eSPI.h>
+#include <SD2Common.h>
 
 #include "config.h"
 #include "DeepSeekClient.h"
@@ -25,11 +27,16 @@ Adafruit_NeoPixel ws2812(1, 12, NEO_GRB + NEO_KHZ800);
 
 TFT_eSPI tft = TFT_eSPI();
 
+// ---------- 公共基础组件（sd2-common）----------
+static sd2::Wifi wifi;
+static sd2::SleepScheduler sleepSched(SLEEP_START_HOUR, SLEEP_END_HOUR);
+// SD2 固定硬件：背光 GPIO5(D1)，反相 PWM（代码自动反转，数值越大越亮）
+static sd2::Backlight backlight(5, sd2::Backlight::PWM_INVERTED);
+
 // ---------- 颜色 ----------
 #define C_BG      tft.color565(0x0E, 0x11, 0x20)
 #define C_CARD    tft.color565(0x1B, 0x22, 0x3C)
 #define C_BORDER  tft.color565(0x2E, 0x38, 0x58)
-#define C_LINE    tft.color565(0x23, 0x2B, 0x46)
 #define C_SUB     tft.color565(0x8A, 0x94, 0xB8)
 #define C_LABEL   tft.color565(0x9A, 0xA5, 0xC8)
 #define C_DATE    tft.color565(0x8F, 0x9B, 0xBF)
@@ -41,15 +48,12 @@ TFT_eSPI tft = TFT_eSPI();
 #define C_YELLOW  tft.color565(0xF6, 0xC3, 0x43)
 
 // ---------- 状态 ----------
-static bool wifiReady = false;
 static bool bootDone = false;
 static bool hasData = false;
 static bool fetching = false;
 static bool wifiFailShown = false;
-static bool timeSynced = false;
-static bool sleeping = false;
+static bool ntpDone = false;
 static uint32_t lastFetchMs = 0;
-static uint32_t lastWifiAttempt = 0;
 static uint32_t lastSleepCheck = 0;
 static uint32_t lastHeapPrint = 0;
 static uint32_t bootStart = 0;
@@ -58,18 +62,7 @@ static DeepSeekBalance lastData;
 static uint16_t dotColor = C_YELLOW;
 static time_t lastUpdateTime = 0; // 数据更新时间（本地时区）
 
-// ---------- 工具 ----------
-String prettyBalance(const String &s) {
-    String r = s;
-    int dot = r.indexOf('.');
-    if (dot >= 0) {
-        while (r.length() > 0 && r.endsWith("0")) r.remove(r.length() - 1);
-        if (r.endsWith(".")) r.remove(r.length() - 1);
-    }
-    if (r.length() == 0) r = "0";
-    return r;
-}
-
+// ---------- 界面工具 ----------
 void drawText(int x, int y, const String &s, uint16_t color, const GFXfont *font) {
     tft.setFreeFont(font);
     tft.setTextColor(color);
@@ -84,15 +77,6 @@ int textWidth(const String &s, const GFXfont *font) {
 
 void drawDot(int x, int y, uint16_t color) {
     tft.fillCircle(x, y, 5, color);
-}
-
-void setBacklight(int value) {
-    pinMode(TFT_BL, OUTPUT);
-#if BACKLIGHT_INVERTED
-    analogWrite(TFT_BL, 1023 - value);
-#else
-    analogWrite(TFT_BL, value);
-#endif
 }
 
 #if USE_WS2812_STATUS
@@ -116,7 +100,7 @@ void drawBootPage(bool fail) {
 // ---------- 主页面元素 ----------
 void drawBigTotal() {
     tft.fillRect(10, 44, 220, 64, C_BG); // 清除旧数字，避免残影
-    String total = hasData ? prettyBalance(lastData.total_balance) : "--";
+    String total = hasData ? sd2::trimNumber(lastData.total_balance) : "--";
     tft.setTextFont(7); // 48px 七段数字（原版字体）
     tft.setTextDatum(TL_DATUM);
     int w = tft.textWidth(total, 7);
@@ -136,13 +120,7 @@ void drawDate() {
     tft.fillRect(0, 206, 240, 34, C_BG);
     String s = "----";
     if (lastUpdateTime > 0) {
-        struct tm tmv;
-        localtime_r(&lastUpdateTime, &tmv);
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
-                 tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
-                 tmv.tm_hour, tmv.tm_min);
-        s = buf;
+        s = sd2::formatLocalTime(lastUpdateTime, "%Y-%m-%d %H:%M");
     }
     drawText((240 - textWidth(s, &FreeSans9pt7b)) / 2, 214, s, C_DATE, &FreeSans9pt7b);
 }
@@ -168,38 +146,27 @@ void drawMainPage() {
     drawText(26, 166, "GRANTED", C_LABEL, &FreeSans9pt7b);
     tft.drawFastHLine(36, 154, 168, C_BORDER);
 
-    drawRowValue(128, hasData ? prettyBalance(lastData.topped_up_balance) : "--");
-    drawRowValue(166, hasData ? prettyBalance(lastData.granted_balance) : "--");
+    drawRowValue(128, hasData ? sd2::trimNumber(lastData.topped_up_balance) : "--");
+    drawRowValue(166, hasData ? sd2::trimNumber(lastData.granted_balance) : "--");
     drawDate();
 }
 
 // ---------- 定时休眠 ----------
 bool isSleepHour() {
-    if (!timeSynced) return false; // 时间未同步时不休眠
-    time_t now = time(nullptr);
-    struct tm tmv;
-    localtime_r(&now, &tmv);
-    int h = tmv.tm_hour;
-#if SLEEP_START_HOUR < SLEEP_END_HOUR
-    return (h >= SLEEP_START_HOUR && h < SLEEP_END_HOUR);
-#else
-    return (h >= SLEEP_START_HOUR || h < SLEEP_END_HOUR); // 跨天窗口
-#endif
+    return sd2::inSleepWindow(sd2::localHour(), SLEEP_START_HOUR, SLEEP_END_HOUR);
 }
 
 void updateSleep() {
 #if ENABLE_SLEEP
-    bool should = isSleepHour();
-    if (should && !sleeping) {
-        sleeping = true;
-        analogWrite(TFT_BL, 1023); // 反相背光：高电平 = 关闭
+    bool changed = sleepSched.update(sd2::localHour());
+    if (changed && sleepSched.sleeping()) {
+        backlight.off();
 #if USE_WS2812_STATUS
         setLed(ws2812.Color(0, 0, 0));
 #endif
         Serial.println("Sleep mode: display off, fetch paused");
-    } else if (!should && sleeping) {
-        sleeping = false;
-        setBacklight(BRIGHTNESS);
+    } else if (changed && !sleepSched.sleeping()) {
+        backlight.on();
 #if USE_WS2812_STATUS
         setLed(ws2812.Color(0, 80, 255));
 #endif
@@ -212,52 +179,39 @@ void updateSleep() {
 
 // ---------- 网络 ----------
 void handleWiFi() {
-    if (WiFi.status() == WL_CONNECTED) {
-        if (!wifiReady) {
-            wifiReady = true;
-            Serial.print("WiFi connected, IP: ");
-            Serial.println(WiFi.localIP().toString().c_str());
-            bootDone = true;
-            dotColor = C_YELLOW;
-            if (!sleeping) drawMainPage();
-            configTime(TZ_OFFSET_SEC, 0, NTP_SERVER, "pool.ntp.org");
-            lastFetchMs = millis() - POLL_INTERVAL_MS; // 立即拉取
-        }
-        return;
-    }
-
-    if (wifiReady) {
-        wifiReady = false;
+    wifi.loop();
+    if (wifi.justConnected()) {
+        Serial.print("WiFi connected, IP: ");
+        Serial.println(wifi.ip().c_str());
+        bootDone = true;
         dotColor = C_YELLOW;
-        if (bootDone) {
-            drawDot(224, 15, dotColor);
-        }
+        if (!sleepSched.sleeping()) drawMainPage();
+        sd2::timeBegin(TZ_OFFSET_SEC, NTP_SERVER);
+        lastFetchMs = millis() - POLL_INTERVAL_MS; // 立即拉取
+    }
+    if (wifi.justDisconnected()) {
+        dotColor = C_YELLOW;
+        if (bootDone) drawDot(224, 15, dotColor);
     }
 
-    if (millis() - lastWifiAttempt > 5000) {
-        lastWifiAttempt = millis();
-        WiFi.mode(WIFI_STA);
-        WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    }
-
-    if (!bootDone && !wifiFailShown && millis() - bootStart > 30000) {
+    if (!wifi.connected() && !bootDone && !wifiFailShown && millis() - bootStart > 30000) {
         wifiFailShown = true;
         drawBootPage(true);
     }
 
 #if USE_WS2812_STATUS
-    setLed(ws2812.Color(0, 80, 255)); // 蓝 = 连接中
+    if (!wifi.connected()) setLed(ws2812.Color(0, 80, 255)); // 蓝 = 连接中
 #endif
 }
 
 void handleFetch() {
-    if (!wifiReady || fetching || sleeping) return;
+    if (!wifi.connected() || fetching || sleepSched.sleeping()) return;
     if (millis() - lastFetchMs < POLL_INTERVAL_MS) return;
 
     // 证书校验前先等 NTP 时间同步
-    if (!timeSynced) {
-        if (time(nullptr) > 1600000000) {
-            timeSynced = true;
+    if (!ntpDone) {
+        if (sd2::timeSynced()) {
+            ntpDone = true;
             Serial.printf("NTP time synced: %lu\n", (unsigned long)time(nullptr));
         }
         return;
@@ -291,8 +245,8 @@ void handleFetch() {
         Serial.printf("Balance: %s %s (available=%d)\n",
                       d.total_balance.c_str(), d.currency.c_str(), d.is_available);
         drawBigTotal();
-        drawRowValue(128, prettyBalance(d.topped_up_balance));
-        drawRowValue(166, prettyBalance(d.granted_balance));
+        drawRowValue(128, sd2::trimNumber(d.topped_up_balance));
+        drawRowValue(166, sd2::trimNumber(d.granted_balance));
         drawDate();
     } else {
         dotColor = C_RED;
@@ -316,7 +270,9 @@ void setup() {
 
     tft.begin();
     tft.setRotation(0);
-    setBacklight(BRIGHTNESS);
+
+    backlight.begin();
+    backlight.setBrightness(BRIGHTNESS);
 
     bootStart = millis();
     drawBootPage(false);
@@ -327,9 +283,7 @@ void setup() {
     setLed(ws2812.Color(0, 80, 255));
 #endif
 
-    WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-    lastWifiAttempt = millis();
+    wifi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
 void loop() {
