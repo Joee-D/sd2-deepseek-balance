@@ -34,9 +34,9 @@ static sd2::SleepScheduler sleepSched(SLEEP_START_HOUR, SLEEP_END_HOUR);
 static sd2::Backlight backlight(5, sd2::Backlight::PWM_INVERTED);
 
 // ---------- 颜色 ----------
-#define C_BG      tft.color565(0x0E, 0x11, 0x20)
-#define C_CARD    tft.color565(0x1B, 0x22, 0x3C)
-#define C_BORDER  tft.color565(0x2E, 0x38, 0x58)
+#define C_BG      tft.color565(0x00, 0x00, 0x00)
+#define C_CARD    tft.color565(0x14, 0x19, 0x26)
+#define C_BORDER  tft.color565(0x28, 0x32, 0x49)
 #define C_SUB     tft.color565(0x8A, 0x94, 0xB8)
 #define C_LABEL   tft.color565(0x9A, 0xA5, 0xC8)
 #define C_DATE    tft.color565(0x8F, 0x9B, 0xBF)
@@ -126,6 +126,7 @@ void drawDate() {
 }
 
 void drawMainPage() {
+    tft.startWrite();
     tft.fillScreen(C_BG);
 
     // 顶栏：左上角 DeepSeek 完整字标（鲸鱼 + deepseek）
@@ -149,6 +150,7 @@ void drawMainPage() {
     drawRowValue(128, hasData ? sd2::trimNumber(lastData.topped_up_balance) : "--");
     drawRowValue(166, hasData ? sd2::trimNumber(lastData.granted_balance) : "--");
     drawDate();
+    tft.endWrite();
 }
 
 // ---------- 定时休眠 ----------
@@ -244,14 +246,20 @@ void handleFetch() {
         dotColor = C_GREEN;
         Serial.printf("Balance: %s %s (available=%d)\n",
                       d.total_balance.c_str(), d.currency.c_str(), d.is_available);
+        tft.startWrite(); // 单事务批量重绘，避免逐块清空闪动
         drawBigTotal();
         drawRowValue(128, sd2::trimNumber(d.topped_up_balance));
         drawRowValue(166, sd2::trimNumber(d.granted_balance));
         drawDate();
+        tft.endWrite();
     } else {
         dotColor = C_RED;
         Serial.printf("Fetch failed: %s (HTTP %d)\n", d.error.c_str(), d.http_code);
-        if (!hasData) drawBigTotal();
+        if (!hasData) {
+            tft.startWrite();
+            drawBigTotal();
+            tft.endWrite();
+        }
     }
     drawDot(224, 15, dotColor);
 
