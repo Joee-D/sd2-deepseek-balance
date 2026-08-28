@@ -7,8 +7,6 @@
 // 底层 HTTP 读取/解析由 sd2-common 的 sd2::readHttpResponse 提供。
 
 #include <Arduino.h>
-#include <ESP8266WiFi.h>
-#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <SD2Common.h>
 
@@ -26,42 +24,21 @@ struct DeepSeekBalance {
     String error;               // 中文错误描述
 };
 
-static BearSSL::X509List dsTrustAnchor(DIGICERT_GLOBAL_ROOT_G2_PEM);
+static sd2::Https https(DIGICERT_GLOBAL_ROOT_G2_PEM, VERIFY_TLS_CERT);
 
 static bool fetchDeepSeekBalance(DeepSeekBalance &out, uint32_t timeout_ms = 8000) {
     out = DeepSeekBalance();
 
-    WiFiClientSecure client;
-#if VERIFY_TLS_CERT
-    client.setTrustAnchors(&dsTrustAnchor);
-#else
-    client.setInsecure();
-#endif
-    client.setTimeout(timeout_ms / 1000);
-
-    uint32_t t0 = millis();
-    if (!client.connect("api.deepseek.com", 443)) {
-        char sslErr[64] = {0};
-        client.getLastSSLError(sslErr, sizeof(sslErr));
-        Serial.printf("TLS connect failed after %lu ms, ssl=%s\n", millis() - t0, sslErr);
-        out.error = "Network error";
+    sd2::HttpResponse resp;
+    String error;
+    if (!https.get("api.deepseek.com", "/user/balance",
+                   DEEPSEEK_API_KEY, "SD2-DeepSeek-Balance/1.0",
+                   resp, error, timeout_ms)) {
+        out.error = error;
         return false;
     }
-
-    client.print("GET /user/balance HTTP/1.1\r\n"
-                 "Host: api.deepseek.com\r\n"
-                 "Authorization: Bearer ");
-    client.print(DEEPSEEK_API_KEY);
-    client.print("\r\n"
-                 "User-Agent: SD2-DeepSeek-Balance/1.0\r\n"
-                 "Accept: application/json\r\n"
-                 "Connection: close\r\n\r\n");
-    client.flush();
-
-    // 读取响应（最多 6 秒），自动拆 header/body、解析状态码、解 chunked
-    sd2::HttpResponse resp = sd2::readHttpResponse(client, 6000);
     out.http_code = resp.httpCode;
-    Serial.printf("HTTP %d (%lu ms)\n", out.http_code, millis() - t0);
+    Serial.printf("HTTP %d\n", out.http_code);
 
     DynamicJsonDocument doc(1024);
     DeserializationError err = deserializeJson(doc, resp.body);

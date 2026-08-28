@@ -1,7 +1,7 @@
 // ============================================================
 //  SD2 小电视 DeepSeek 余额显示器
 //
-//  硬件: ESP8266(ESP-12F) + 1.3" ST7789 240x240 (无CS) + WS2812
+//  硬件: ESP8266(ESP-12F) + 1.3" ST7789 240x240 (无CS)
 //  参考: https://github.com/Jason6111/sd2
 //  接口: https://api-docs.deepseek.com/zh-cn/api/get-user-balance
 //
@@ -15,51 +15,27 @@
 #include <time.h>
 #include <TFT_eSPI.h>
 #include <SD2Common.h>
+#include <Sd2App.h>
 
 #include "config.h"
 #include "DeepSeekClient.h"
 #include "logo.h"
 
-#if USE_WS2812_STATUS
-#include <Adafruit_NeoPixel.h>
-Adafruit_NeoPixel ws2812(1, 12, NEO_GRB + NEO_KHZ800);
-#endif
+// ---------- 公共运行骨架（sd2-common）----------
+static sd2::App app(POLL_INTERVAL_MS, SLEEP_START_HOUR, SLEEP_END_HOUR);
+TFT_eSPI &tft = app.tft;
+static sd2::Wifi &wifi = app.wifi;
+static sd2::SleepScheduler &sleepSched = app.sleep;
+static sd2::Backlight &backlight = app.backlight;
+static bool &bootDone = app.bootDone;
+static bool &ntpDone = app.ntpDone;
+static uint32_t &lastFetchMs = app.lastFetchMs;
 
-TFT_eSPI tft = TFT_eSPI();
-
-// ---------- 公共基础组件（sd2-common）----------
-static sd2::Wifi wifi;
-static sd2::SleepScheduler sleepSched(SLEEP_START_HOUR, SLEEP_END_HOUR);
-// SD2 固定硬件：背光 GPIO5(D1)，反相 PWM（代码自动反转，数值越大越亮）
-static sd2::Backlight backlight(5, sd2::Backlight::PWM_INVERTED);
-
-// ---------- 颜色 ----------
-#define C_BG      tft.color565(0x00, 0x00, 0x00)
-#define C_CARD    tft.color565(0x14, 0x19, 0x26)
-#define C_BORDER  tft.color565(0x28, 0x32, 0x49)
-#define C_SUB     tft.color565(0x8A, 0x94, 0xB8)
-#define C_LABEL   tft.color565(0x9A, 0xA5, 0xC8)
-#define C_DATE    tft.color565(0x8F, 0x9B, 0xBF)
-#define C_SHADOW  tft.color565(0x0A, 0x0F, 0x2A)
-#define C_ACCENT  tft.color565(0x4D, 0x6B, 0xFE)
-#define C_WHITE   tft.color565(0xFF, 0xFF, 0xFF)
-#define C_GREEN   tft.color565(0x34, 0xD3, 0x99)
-#define C_RED     tft.color565(0xFF, 0x6B, 0x6B)
-#define C_YELLOW  tft.color565(0xF6, 0xC3, 0x43)
-
-// ---------- 状态 ----------
-static bool bootDone = false;
+// ---------- 数据状态 ----------
 static bool hasData = false;
 static bool fetching = false;
-static bool wifiFailShown = false;
-static bool ntpDone = false;
-static uint32_t lastFetchMs = 0;
-static uint32_t lastSleepCheck = 0;
-static uint32_t lastHeapPrint = 0;
-static uint32_t bootStart = 0;
 
 static DeepSeekBalance lastData;
-static uint16_t dotColor = C_YELLOW;
 static time_t lastUpdateTime = 0; // 数据更新时间（本地时区）
 
 // ---------- 界面工具 ----------
@@ -74,19 +50,6 @@ int textWidth(const String &s, const GFXfont *font) {
     tft.setFreeFont(font);
     return tft.textWidth(s);
 }
-
-void drawDot(int x, int y, uint16_t color) {
-    tft.fillCircle(x, y, 5, color);
-}
-
-#if USE_WS2812_STATUS
-void setLed(uint32_t rgb) {
-    ws2812.setPixelColor(0, rgb);
-    noInterrupts();
-    ws2812.show();
-    interrupts();
-}
-#endif
 
 // ---------- 启动页 ----------
 void drawBootPage(bool fail) {
@@ -131,8 +94,6 @@ void drawMainPage() {
 
     // 顶栏：左上角 DeepSeek 完整字标（鲸鱼 + deepseek）
     tft.pushImage(10, 1, DS_LOGO_W, DS_LOGO_H, ds_logo);
-    drawDot(224, 15, dotColor);
-    tft.drawCircle(224, 15, 7, C_BORDER); // 状态点圆环
     tft.drawFastHLine(16, 40, 208, C_BORDER);
 
     // 总余额（大数字，无标题）
@@ -153,57 +114,13 @@ void drawMainPage() {
     tft.endWrite();
 }
 
-// ---------- 定时休眠 ----------
-bool isSleepHour() {
-    return sd2::inSleepWindow(sd2::localHour(), SLEEP_START_HOUR, SLEEP_END_HOUR);
+// ---------- 公共骨架回调 ----------
+static void onConnected() {
+    if (!sleepSched.sleeping()) drawMainPage();
 }
 
-void updateSleep() {
-#if ENABLE_SLEEP
-    bool changed = sleepSched.update(sd2::localHour());
-    if (changed && sleepSched.sleeping()) {
-        backlight.off();
-#if USE_WS2812_STATUS
-        setLed(ws2812.Color(0, 0, 0));
-#endif
-        Serial.println("Sleep mode: display off, fetch paused");
-    } else if (changed && !sleepSched.sleeping()) {
-        backlight.on();
-#if USE_WS2812_STATUS
-        setLed(ws2812.Color(0, 80, 255));
-#endif
-        if (bootDone) drawMainPage();
-        lastFetchMs = millis() - POLL_INTERVAL_MS; // 醒来立即刷新
-        Serial.println("Wake up: display on");
-    }
-#endif
-}
-
-// ---------- 网络 ----------
-void handleWiFi() {
-    wifi.loop();
-    if (wifi.justConnected()) {
-        Serial.print("WiFi connected, IP: ");
-        Serial.println(wifi.ip().c_str());
-        bootDone = true;
-        dotColor = C_YELLOW;
-        if (!sleepSched.sleeping()) drawMainPage();
-        sd2::timeBegin(TZ_OFFSET_SEC, NTP_SERVER);
-        lastFetchMs = millis() - POLL_INTERVAL_MS; // 立即拉取
-    }
-    if (wifi.justDisconnected()) {
-        dotColor = C_YELLOW;
-        if (bootDone) drawDot(224, 15, dotColor);
-    }
-
-    if (!wifi.connected() && !bootDone && !wifiFailShown && millis() - bootStart > 30000) {
-        wifiFailShown = true;
-        drawBootPage(true);
-    }
-
-#if USE_WS2812_STATUS
-    if (!wifi.connected()) setLed(ws2812.Color(0, 80, 255)); // 蓝 = 连接中
-#endif
+static void onWake() {
+    if (bootDone) drawMainPage();
 }
 
 void handleFetch() {
@@ -218,19 +135,15 @@ void handleFetch() {
         }
         return;
     }
-    if (isSleepHour()) return; // 休眠时段不拉取数据
+    if (sleepSched.sleeping()) return; // 休眠时段不拉取数据
 
     // 未填 Key 时直接提示
     if (strlen(DEEPSEEK_API_KEY) < 20 || strncmp(DEEPSEEK_API_KEY, "sk-", 3) != 0) {
-        dotColor = C_RED;
-        drawDot(224, 15, dotColor);
         lastFetchMs = millis();
         return;
     }
 
     fetching = true;
-    dotColor = C_YELLOW;
-    drawDot(224, 15, dotColor);
 
     DeepSeekBalance d;
     ESP.wdtDisable(); // TLS 握手为阻塞操作，暂时关闭软看门狗
@@ -243,7 +156,6 @@ void handleFetch() {
         hasData = true;
         lastData = d;
         lastUpdateTime = time(nullptr);
-        dotColor = C_GREEN;
         Serial.printf("Balance: %s %s (available=%d)\n",
                       d.total_balance.c_str(), d.currency.c_str(), d.is_available);
         tft.startWrite(); // 单事务批量重绘，避免逐块清空闪动
@@ -253,7 +165,6 @@ void handleFetch() {
         drawDate();
         tft.endWrite();
     } else {
-        dotColor = C_RED;
         Serial.printf("Fetch failed: %s (HTTP %d)\n", d.error.c_str(), d.http_code);
         if (!hasData) {
             tft.startWrite();
@@ -261,12 +172,6 @@ void handleFetch() {
             tft.endWrite();
         }
     }
-    drawDot(224, 15, dotColor);
-
-#if USE_WS2812_STATUS
-    setLed(ok ? ws2812.Color(0, 255, 60) : ws2812.Color(255, 40, 40));
-#endif
-    Serial.printf("Free heap: %u B\n", ESP.getFreeHeap());
 }
 
 // ---------- 主程序 ----------
@@ -276,36 +181,10 @@ void setup() {
     Serial.println();
     Serial.println("SD2 DeepSeek Balance Monitor starting...");
 
-    tft.begin();
-    tft.setRotation(0);
-
-    backlight.begin();
-    backlight.setBrightness(BRIGHTNESS);
-
-    bootStart = millis();
-    drawBootPage(false);
-
-#if USE_WS2812_STATUS
-    ws2812.begin();
-    ws2812.setBrightness(40);
-    setLed(ws2812.Color(0, 80, 255));
-#endif
-
-    wifi.begin(WIFI_SSID, WIFI_PASSWORD);
+    app.setHooks(drawBootPage, handleFetch, onConnected, nullptr, nullptr, onWake);
+    app.begin(WIFI_SSID, WIFI_PASSWORD, BRIGHTNESS, TZ_OFFSET_SEC, NTP_SERVER);
 }
 
 void loop() {
-    handleWiFi();
-    handleFetch();
-
-    if (millis() - lastSleepCheck >= 1000) {
-        lastSleepCheck = millis();
-        updateSleep();
-    }
-    if (millis() - lastHeapPrint >= 10000) {
-        lastHeapPrint = millis();
-        Serial.printf("Free heap: %u B\n", ESP.getFreeHeap());
-    }
-
-    delay(20);
+    app.loop();
 }
