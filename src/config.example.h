@@ -30,7 +30,6 @@ const uint32_t POLL_INTERVAL_MS = 60UL * 1000UL; // 默认 60 秒
 
 // ---- 定时休眠 ----
 // 默认 00:00-07:00 关闭显示并停止获取数据（WiFi 保持连接，醒来立即恢复）
-#define ENABLE_SLEEP 1
 #define SLEEP_START_HOUR 0   // 开始休眠（本地时间，小时）
 #define SLEEP_END_HOUR 7     // 结束休眠（本地时间，小时）
 
