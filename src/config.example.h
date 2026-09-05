@@ -16,7 +16,7 @@ const char WIFI_PASSWORD[] = "your-wifi-password";
 const char DEEPSEEK_API_KEY[] = "sk-your-deepseek-api-key";
 
 // ---- 刷新间隔（毫秒）----
-const uint32_t POLL_INTERVAL_MS = 60UL * 1000UL; // 默认 60 秒
+const uint32_t POLL_INTERVAL_MS = 5UL * 60UL * 1000UL; // 默认 5 分钟
 
 // ---- HTTPS 证书校验 ----
 // 1 = 校验证书（默认，内置 DigiCert Global Root G2，见 cert.h）

@@ -14,7 +14,7 @@
 - **TOP-UP**：充值余额；**GRANTED**：赠送余额
 - 底部显示数据日期时间（如 2026-08-23 11:39）
 - 定时休眠：默认 00:00-07:00 关闭显示并停止获取数据（`config.h` 可改）
-- 默认每 60 秒自动刷新（`config.h` 可改）
+- 默认每 5 分钟自动刷新（`config.h` 可改）
 
 界面直接用 TFT_eSPI 绘制（内置字体放 Flash，ESP8266 上稳定可靠，不引入 LVGL）。
 
@@ -48,7 +48,7 @@
    ```
    - `WIFI_SSID` / `WIFI_PASSWORD`：你的 WiFi
    - `DEEPSEEK_API_KEY`：在 [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) 创建，`sk-` 开头
-   - `POLL_INTERVAL_MS`：刷新间隔（默认 60 秒）
+   - `POLL_INTERVAL_MS`：刷新间隔（默认 5 分钟）
    - `BRIGHTNESS`：屏幕亮度（0~1023，默认 800）
 4. USB 连接小电视，点击 VS Code 底部 PlatformIO 工具栏的 **Upload**（或终端 `pio run -t upload`）。
 5. 点击 **Serial Monitor**（波特率 921600）可查看日志。
@@ -75,7 +75,7 @@ lib/sd2-common/       公共库子模块：WiFi 连接/校时/休眠/背光/HTTP
 2. 通过 NTP 同步系统时间（ESP8266 无 RTC，校验证书前必须有正确时间）。
 3. 用 WiFiClientSecure 建立 TLS 连接，校验 DigiCert 根证书，请求 `GET /user/balance`。
 4. 解析返回的 `is_available` / `total_balance` / `granted_balance` / `topped_up_balance` 并绘制。
-5. 每 60 秒自动刷新（请求期间临时关闭软看门狗，避免 TLS 阻塞导致复位）。
+5. 每 5 分钟自动刷新（请求期间临时关闭软看门狗，避免 TLS 阻塞导致复位）。
 
 ## 常见问题
 
